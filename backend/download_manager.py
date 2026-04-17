@@ -15,6 +15,7 @@ class DownloadStatus(str, Enum):
     QUEUED = "queued"
     DOWNLOADING = "downloading"
     COMPLETED = "completed"
+    SKIPPED = "skipped"
     FAILED = "failed"
 
 
@@ -32,7 +33,7 @@ class DownloadItem:
 
 
 class DownloadManager:
-    MAX_CONCURRENT = 4
+    MAX_CONCURRENT = 32
 
     def __init__(self, drive_service):
         self.drive_service = drive_service
@@ -47,20 +48,38 @@ class DownloadManager:
     def queue_downloads(self, files, dest_dir):
         batch_id = str(uuid.uuid4())[:8]
         with self._lock:
+            in_flight = any(
+                i.status in (DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING)
+                for i in self._downloads.values()
+            )
             self._batch_id = batch_id
             self._batch_total = len(files)
             self._batch_completed = 0
             self._batch_failed = 0
+        if not in_flight:
+            self._cleanup_stale_parts(dest_dir)
+        claimed = set()
         for f in files:
+            mime_type = f.get("mime_type", f.get("mimeType", ""))
             safe_name = self._sanitize_filename(f["name"])
             dest_path = os.path.join(dest_dir, safe_name)
-            dest_path = self._deduplicate_path(dest_path)
+            dest_path = self.drive_service.resolve_export_path(mime_type, dest_path)
+            already_on_disk = os.path.exists(dest_path)
+            if not already_on_disk and dest_path.lower() in claimed:
+                dest_path = self._deduplicate_path(dest_path, claimed)
+            claimed.add(dest_path.lower())
             item = DownloadItem(
                 id=str(uuid.uuid4())[:8], file_id=f["id"],
-                file_name=f["name"],
-                mime_type=f.get("mime_type", f.get("mimeType", "")),
+                file_name=f["name"], mime_type=mime_type,
                 dest_path=dest_path, size=int(f.get("size", 0)),
             )
+            if already_on_disk:
+                item.status = DownloadStatus.SKIPPED
+                item.progress = 1.0
+                with self._lock:
+                    self._downloads[item.id] = item
+                    self._batch_completed += 1
+                continue
             with self._lock:
                 self._downloads[item.id] = item
             self._executor.submit(self._download_one, item)
@@ -92,10 +111,26 @@ class DownloadManager:
                 item.dest_path = actual_path
                 self._batch_completed += 1
         except Exception as e:
+            print(f"[download] FAILED {item.file_name!r} (mime={item.mime_type}): {e}", flush=True)
             with self._lock:
                 item.status = DownloadStatus.FAILED
                 item.error = str(e)
                 self._batch_failed += 1
+
+    @staticmethod
+    def _cleanup_stale_parts(dest_dir):
+        if not os.path.isdir(dest_dir):
+            return
+        removed = 0
+        for name in os.listdir(dest_dir):
+            if name.endswith(".part"):
+                try:
+                    os.remove(os.path.join(dest_dir, name))
+                    removed += 1
+                except OSError:
+                    pass
+        if removed:
+            print(f"[download] cleaned up {removed} stale .part file(s) in {dest_dir}", flush=True)
 
     @staticmethod
     def _sanitize_filename(name):
@@ -104,11 +139,11 @@ class DownloadManager:
         return name or "unnamed"
 
     @staticmethod
-    def _deduplicate_path(path):
-        if not os.path.exists(path):
-            return path
+    def _deduplicate_path(path, claimed):
         base, ext = os.path.splitext(path)
         counter = 1
-        while os.path.exists(f"{base} ({counter}){ext}"):
+        while True:
+            candidate = f"{base} ({counter}){ext}"
+            if not os.path.exists(candidate) and candidate.lower() not in claimed:
+                return candidate
             counter += 1
-        return f"{base} ({counter}){ext}"

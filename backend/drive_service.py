@@ -4,6 +4,7 @@ Google Drive API v3 wrapper with pagination, export mapping, and backoff.
 
 import io
 import os
+import threading
 import time
 import random
 
@@ -32,7 +33,16 @@ PAGE_SIZE = 1000
 
 class DriveService:
     def __init__(self, credentials):
-        self.service = build("drive", "v3", credentials=credentials)
+        self._credentials = credentials
+        self._tls = threading.local()
+
+    @property
+    def service(self):
+        svc = getattr(self._tls, "service", None)
+        if svc is None:
+            svc = build("drive", "v3", credentials=self._credentials, cache_discovery=False)
+            self._tls.service = svc
+        return svc
 
     def list_all_files(self, on_page=None):
         page_token = None
@@ -64,35 +74,48 @@ class DriveService:
             if not page_token:
                 break
 
-    def download_file(self, file_id, mime_type, dest_path, on_progress=None):
+    @staticmethod
+    def resolve_export_path(mime_type, dest_path):
         if mime_type in EXPORT_MAP:
-            export_info = EXPORT_MAP[mime_type]
-            request = self.service.files().export_media(fileId=file_id, mimeType=export_info["mime"])
-            base, ext = os.path.splitext(dest_path)
-            if ext != export_info["ext"]:
-                dest_path = base + export_info["ext"]
+            ext = EXPORT_MAP[mime_type]["ext"]
+        elif mime_type.startswith("application/vnd.google-apps."):
+            ext = ".pdf"
+        else:
+            return dest_path
+        base, cur_ext = os.path.splitext(dest_path)
+        return base + ext if cur_ext != ext else dest_path
+
+    def download_file(self, file_id, mime_type, dest_path, on_progress=None):
+        dest_path = self.resolve_export_path(mime_type, dest_path)
+        if mime_type in EXPORT_MAP:
+            request = self.service.files().export_media(fileId=file_id, mimeType=EXPORT_MAP[mime_type]["mime"])
         elif mime_type.startswith("application/vnd.google-apps."):
             request = self.service.files().export_media(fileId=file_id, mimeType="application/pdf")
-            base, ext = os.path.splitext(dest_path)
-            if ext != ".pdf":
-                dest_path = base + ".pdf"
         else:
             request = self.service.files().get_media(fileId=file_id)
         os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
-        fh = io.FileIO(dest_path, "wb")
-        downloader = MediaIoBaseDownload(fh, request, chunksize=10 * 1024 * 1024)
-        done = False
-        while not done:
-            try:
+        tmp_path = dest_path + ".part"
+        fh = io.FileIO(tmp_path, "wb")
+        try:
+            downloader = MediaIoBaseDownload(fh, request, chunksize=10 * 1024 * 1024)
+            done = False
+            while not done:
                 status, done = downloader.next_chunk()
                 if on_progress and status:
                     on_progress(status.progress())
-            except HttpError as e:
-                fh.close()
-                if os.path.exists(dest_path):
-                    os.remove(dest_path)
-                raise
+        except Exception:
+            fh.close()
+            if os.path.exists(tmp_path):
+                try: os.remove(tmp_path)
+                except OSError: pass
+            raise
         fh.close()
+        try:
+            os.replace(tmp_path, dest_path)
+        except FileNotFoundError:
+            if os.path.exists(dest_path):
+                return dest_path
+            raise
         return dest_path
 
     def delete_file(self, file_id):

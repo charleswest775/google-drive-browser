@@ -283,7 +283,7 @@
     if (!files.length) { statusText.textContent = "No files selected (folders are skipped)"; return; }
     try {
       await api("/download", { method: "POST", body: JSON.stringify({ files: files.map((f) => ({ id: f.id, name: f.name, mime_type: f.mime_type, size: f.size })), dest_dir: destDir }) });
-      downloadModal.style.display = "flex"; dlCloseBtn.style.display = "none"; pollDownloadProgress();
+      downloadModal.style.display = "flex"; dlCloseBtn.style.display = ""; pollDownloadProgress();
     } catch (e) { statusText.textContent = "Download error: " + e.message; }
   }
 

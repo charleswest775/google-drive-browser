@@ -161,8 +161,9 @@ class FileCache:
         self._conn.execute("UPDATE files SET is_orphan = 0")
         self._conn.execute("""
             UPDATE files SET is_orphan = 1
-            WHERE trashed = 0 AND parent_id != '' AND parent_id != 'root'
-            AND parent_id NOT IN (SELECT id FROM files WHERE is_folder = 1)
+            WHERE trashed = 0 AND parent_id != 'root'
+            AND (parent_id = ''
+                 OR parent_id NOT IN (SELECT id FROM files WHERE is_folder = 1))
         """)
         self._conn.commit()
 

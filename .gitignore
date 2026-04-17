@@ -1,7 +1,10 @@
 node_modules/
+.venv/
 credentials.json
 token.json
 backend/file_cache.db
+backend/file_cache.db-shm
+backend/file_cache.db-wal
 backend/__pycache__/
 *.pyc
 .DS_Store

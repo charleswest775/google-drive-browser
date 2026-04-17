@@ -1,9 +1,10 @@
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const { spawn } = require("child_process");
 const http = require("http");
 
-const BACKEND_PORT = 5000;
+const BACKEND_PORT = 5055;
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 
 let mainWindow;
@@ -23,7 +24,12 @@ function createWindow() {
 }
 
 function startBackend() {
-  const pythonCmd = process.platform === "win32" ? "python" : "python3";
+  const venvPython = process.platform === "win32"
+    ? path.join(__dirname, ".venv", "Scripts", "python.exe")
+    : path.join(__dirname, ".venv", "bin", "python3");
+  const pythonCmd = fs.existsSync(venvPython)
+    ? venvPython
+    : (process.platform === "win32" ? "python" : "python3");
   const serverPath = path.join(__dirname, "backend", "server.py");
   const env = { ...process.env, BACKEND_PORT: String(BACKEND_PORT) };
   backendProcess = spawn(pythonCmd, [serverPath], {

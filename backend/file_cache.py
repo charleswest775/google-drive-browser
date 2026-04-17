@@ -121,6 +121,21 @@ class FileCache:
         rows = self._conn.execute(f"SELECT * FROM files WHERE {where} ORDER BY {order} {direction} LIMIT ? OFFSET ?", params).fetchall()
         return {"files": [dict(r) for r in rows], "total": total, "offset": offset, "limit": limit}
 
+    def get_all_files(self, offset=0, limit=200, sort_by="name", sort_dir="ASC", search=""):
+        allowed_sorts = {"name": "name COLLATE NOCASE", "size": "size", "modified_time": "modified_time", "mime_type": "mime_type"}
+        order = allowed_sorts.get(sort_by, "name COLLATE NOCASE")
+        direction = "DESC" if sort_dir.upper() == "DESC" else "ASC"
+        where = "is_folder = 0 AND trashed = 0"
+        params: list = []
+        if search:
+            where += " AND name LIKE ?"
+            params.append(f"%{search}%")
+        count_row = self._conn.execute(f"SELECT COUNT(*) as cnt FROM files WHERE {where}", params).fetchone()
+        total = count_row["cnt"] if count_row else 0
+        params.extend([limit, offset])
+        rows = self._conn.execute(f"SELECT * FROM files WHERE {where} ORDER BY {order} {direction} LIMIT ? OFFSET ?", params).fetchall()
+        return {"files": [dict(r) for r in rows], "total": total, "offset": offset, "limit": limit}
+
     def search_files(self, query, offset=0, limit=200, sort_by="name", sort_dir="ASC"):
         allowed_sorts = {"name": "name COLLATE NOCASE", "size": "size", "modified_time": "modified_time", "mime_type": "mime_type"}
         order = allowed_sorts.get(sort_by, "name COLLATE NOCASE")

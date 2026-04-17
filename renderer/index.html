@@ -47,6 +47,8 @@
     <div id="toolbar">
       <div class="toolbar-left"><span id="breadcrumb"></span></div>
       <div class="toolbar-right">
+        <button id="hide-downloaded-btn" class="btn btn-sm" title="Hide files already present in a directory">Hide downloaded…</button>
+        <span id="hide-downloaded-info" class="hide-info" style="display:none"></span>
         <span id="selection-count" style="display:none">0 selected</span>
         <button id="select-all-btn" class="btn btn-sm">Select All</button>
         <button id="deselect-btn" class="btn btn-sm" style="display:none">Deselect</button>
@@ -61,6 +63,7 @@
           <div id="folder-tree" class="tree-container"></div>
         </div>
         <div class="sidebar-section">
+          <div class="sidebar-item" data-id="all" data-type="all"><span class="folder-icon">📋</span> All Files (flat)</div>
           <div class="sidebar-item" data-id="orphans" data-type="orphans"><span class="folder-icon">🔗</span> Orphaned Files <span id="orphan-count" class="badge">0</span></div>
         </div>
         <div class="sidebar-section sidebar-stats">
@@ -108,13 +111,52 @@
     </div>
   </div>
 
+  <div id="delete-progress-modal" class="modal" style="display:none">
+    <div class="modal-overlay"></div>
+    <div class="modal-content modal-wide">
+      <h3>Deleting Files</h3>
+      <div class="progress-bar"><div id="del-progress-bar" class="progress-fill"></div></div>
+      <p id="del-progress-text">0 / 0 completed</p>
+      <div id="del-failures-section" style="display:none">
+        <div class="dl-failures-header"><strong>Failed (<span id="del-failures-count">0</span>)</strong></div>
+        <div id="del-failures-list" class="dl-failures-list"></div>
+      </div>
+      <div class="modal-actions"><button id="del-close" class="btn btn-primary" style="display:none">Close</button></div>
+    </div>
+  </div>
+
   <div id="download-modal" class="modal" style="display:none">
     <div class="modal-overlay"></div>
     <div class="modal-content modal-wide">
       <h3>Downloading Files</h3>
       <div class="progress-bar"><div id="dl-progress-bar" class="progress-fill"></div></div>
       <p id="dl-progress-text">0 / 0 completed</p>
-      <div id="dl-items-list" class="dl-items-list"></div>
+      <div class="dl-stats">
+        <div class="dl-stat"><span class="dl-stat-label">Downloaded</span><span id="dl-stat-done" class="dl-stat-value">0</span></div>
+        <div class="dl-stat"><span class="dl-stat-label">Remaining</span><span id="dl-stat-remaining" class="dl-stat-value">0</span></div>
+        <div class="dl-stat"><span class="dl-stat-label">Active</span><span id="dl-stat-active" class="dl-stat-value">0</span></div>
+        <div class="dl-stat"><span class="dl-stat-label">Speed</span><span id="dl-stat-speed" class="dl-stat-value">0 MB/s</span></div>
+        <div class="dl-stat"><span class="dl-stat-label">Bytes</span><span id="dl-stat-bytes" class="dl-stat-value">0 / 0</span></div>
+        <div class="dl-stat"><span class="dl-stat-label">Failed</span><span id="dl-stat-failed" class="dl-stat-value">0</span></div>
+        <div class="dl-stat"><span class="dl-stat-label">Skipped</span><span id="dl-stat-skipped" class="dl-stat-value">0</span></div>
+        <div class="dl-stat"><span class="dl-stat-label">Elapsed</span><span id="dl-stat-elapsed" class="dl-stat-value">0s</span></div>
+      </div>
+      <div id="dl-skipped-section" style="display:none">
+        <div class="dl-failures-header dl-skipped-header">
+          <strong>Skipped (<span id="dl-skipped-count">0</span>)</strong>
+          <span class="hint">already downloaded (manifest match)</span>
+        </div>
+        <div id="dl-skipped-list" class="dl-failures-list"></div>
+      </div>
+      <div id="dl-failures-section" style="display:none">
+        <div class="dl-failures-header">
+          <strong>Failed (<span id="dl-failures-count">0</span>)</strong>
+          <button id="dl-failures-copy" class="btn btn-sm" title="Copy failure log path">Copy log path</button>
+          <button id="dl-failures-clear" class="btn btn-sm" title="Clear in-memory failure list">Clear</button>
+        </div>
+        <p id="dl-failures-log-path" class="hint"></p>
+        <div id="dl-failures-list" class="dl-failures-list"></div>
+      </div>
       <div class="modal-actions"><button id="dl-close" class="btn btn-primary" style="display:none">Close</button></div>
     </div>
   </div>

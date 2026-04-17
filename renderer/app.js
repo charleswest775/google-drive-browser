@@ -17,6 +17,8 @@
   let lastClickedIndex = -1;
   let isIndexing = false;
   let indexPollTimer = null;
+  let hideDownloadedDir = null;
+  let downloadedFileIds = new Set();
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
@@ -33,8 +35,19 @@
   const folderTree = $("#folder-tree"), orphanCountBadge = $("#orphan-count");
   const deleteModal = $("#delete-modal"), deleteCountSpan = $("#delete-count");
   const deleteCancelBtn = $("#delete-cancel"), deleteConfirmBtn = $("#delete-confirm");
+  const deleteProgressModal = $("#delete-progress-modal"), delProgressBar = $("#del-progress-bar");
+  const delProgressText = $("#del-progress-text"), delFailuresSection = $("#del-failures-section");
+  const delFailuresCount = $("#del-failures-count"), delFailuresList = $("#del-failures-list"), delCloseBtn = $("#del-close");
   const downloadModal = $("#download-modal"), dlProgressBar = $("#dl-progress-bar");
-  const dlProgressText = $("#dl-progress-text"), dlItemsList = $("#dl-items-list"), dlCloseBtn = $("#dl-close");
+  const dlProgressText = $("#dl-progress-text"), dlCloseBtn = $("#dl-close");
+  const dlStatDone = $("#dl-stat-done"), dlStatRemaining = $("#dl-stat-remaining"), dlStatActive = $("#dl-stat-active");
+  const dlStatSpeed = $("#dl-stat-speed"), dlStatBytes = $("#dl-stat-bytes"), dlStatFailed = $("#dl-stat-failed");
+  const dlStatSkipped = $("#dl-stat-skipped"), dlStatElapsed = $("#dl-stat-elapsed");
+  const dlFailuresSection = $("#dl-failures-section"), dlFailuresCount = $("#dl-failures-count");
+  const dlFailuresList = $("#dl-failures-list"), dlFailuresLogPath = $("#dl-failures-log-path");
+  const dlFailuresCopy = $("#dl-failures-copy"), dlFailuresClear = $("#dl-failures-clear");
+  const dlSkippedSection = $("#dl-skipped-section"), dlSkippedCount = $("#dl-skipped-count"), dlSkippedList = $("#dl-skipped-list");
+  const hideDownloadedBtn = $("#hide-downloaded-btn"), hideDownloadedInfo = $("#hide-downloaded-info");
   const indexingOverlay = $("#indexing-overlay"), indexingCount = $("#indexing-count");
   const indexingPages = $("#indexing-pages"), indexingBar = $("#indexing-bar");
   const statTotal = $("#stat-total"), statFolders = $("#stat-folders"), statOrphans = $("#stat-orphans");
@@ -78,6 +91,10 @@
     deleteCancelBtn.addEventListener("click", () => (deleteModal.style.display = "none"));
     deleteConfirmBtn.addEventListener("click", doDelete);
     dlCloseBtn.addEventListener("click", () => (downloadModal.style.display = "none"));
+    delCloseBtn.addEventListener("click", () => { deleteProgressModal.style.display = "none"; loadCurrentView(); updateStats(); });
+    hideDownloadedBtn.addEventListener("click", toggleHideDownloaded);
+    dlFailuresCopy.addEventListener("click", copyFailureLogPath);
+    dlFailuresClear.addEventListener("click", clearFailures);
     $$(".sortable").forEach((el) => {
       el.addEventListener("click", () => {
         const col = el.dataset.sort;
@@ -95,6 +112,7 @@
         item.classList.add("active");
         if (type === "root") { currentView = "folder"; currentFolderId = "root"; currentSearch = ""; searchInput.value = ""; loadCurrentView(); }
         else if (type === "orphans") { currentView = "orphans"; currentSearch = ""; searchInput.value = ""; loadCurrentView(); }
+        else if (type === "all") { currentView = "all"; currentSearch = ""; searchInput.value = ""; loadCurrentView(); }
       });
     });
   }
@@ -154,12 +172,14 @@
     showLoading(true); selectedIds.clear(); updateSelectionUI();
     try {
       let endpoint;
-      const params = new URLSearchParams({ offset: "0", limit: "50000", sort_by: sortBy, sort_dir: sortDir });
+      const params = new URLSearchParams({ offset: "0", limit: "100000", sort_by: sortBy, sort_dir: sortDir });
       if (currentView === "folder") { params.set("parent_id", currentFolderId); if (currentSearch) params.set("search", currentSearch); endpoint = "/files/children?" + params; }
       else if (currentView === "orphans") { if (currentSearch) params.set("search", currentSearch); endpoint = "/files/orphans?" + params; }
+      else if (currentView === "all") { if (currentSearch) params.set("search", currentSearch); endpoint = "/files/all?" + params; }
       else if (currentView === "search") { params.set("q", currentSearch); endpoint = "/files/search?" + params; }
       const data = await api(endpoint);
       allFiles = data.files || []; totalCount = data.total || allFiles.length;
+      await applyHideDownloadedFilter();
       showLoading(false);
       if (allFiles.length === 0) { emptyState.style.display = "flex"; fileViewport.style.display = "none"; $("#column-headers").style.display = "none"; }
       else { emptyState.style.display = "none"; fileViewport.style.display = ""; $("#column-headers").style.display = ""; setupVirtualScroll(); }
@@ -226,6 +246,7 @@
 
   async function updateBreadcrumb() {
     if (currentView === "orphans") { breadcrumb.innerHTML = `<span class="breadcrumb-current">Orphaned Files</span>`; return; }
+    if (currentView === "all") { breadcrumb.innerHTML = `<span class="breadcrumb-current">All Files (flat)</span>`; return; }
     if (currentView === "search") { breadcrumb.innerHTML = `<span class="breadcrumb-current">Search: "${escapeHtml(currentSearch)}"</span>`; return; }
     if (currentFolderId === "root") { breadcrumb.innerHTML = `<span class="breadcrumb-current">My Drive</span>`; return; }
     try {
@@ -287,32 +308,176 @@
     } catch (e) { statusText.textContent = "Download error: " + e.message; }
   }
 
+  let lastFailureLogPath = null;
+  let speedSamples = [];
+
   function pollDownloadProgress() {
+    speedSamples = [];
     const timer = setInterval(async () => {
       try {
         const prog = await api("/download/progress");
-        const total = prog.total || 0, completed = prog.completed || 0, failed = prog.failed || 0;
+        const total = prog.total || 0, completed = prog.completed || 0, failed = prog.failed || 0, skipped = prog.skipped || 0;
+        const downloading = prog.downloading || 0;
+        const bytesDone = prog.bytes_downloaded || 0, bytesTotal = prog.bytes_total || 0;
+        const remaining = Math.max(0, total - completed - failed);
+
         dlProgressBar.style.width = (total > 0 ? ((completed + failed) / total) * 100 : 0) + "%";
-        dlProgressText.textContent = `${completed} / ${total} completed` + (failed > 0 ? ` (${failed} failed)` : "");
-        dlItemsList.innerHTML = (prog.items || []).slice(-20).map((item) => `<div class="dl-item"><span class="dl-item-name">${escapeHtml(item.file_name)}</span><span class="dl-item-status ${item.status}">${item.status === "downloading" ? Math.round((item.progress || 0) * 100) + "%" : item.status}</span></div>`).join("");
-        if (completed + failed >= total && total > 0) { clearInterval(timer); dlCloseBtn.style.display = ""; statusText.textContent = `Downloaded ${completed} files`; }
+        const suffix = [failed > 0 ? `${failed} failed` : null, skipped > 0 ? `${skipped} skipped` : null].filter(Boolean).join(", ");
+        dlProgressText.textContent = `${completed} / ${total} completed` + (suffix ? ` (${suffix})` : "");
+
+        const now = Date.now();
+        speedSamples.push({ t: now, b: bytesDone });
+        while (speedSamples.length > 1 && now - speedSamples[0].t > 5000) speedSamples.shift();
+        let speedBps = 0;
+        if (speedSamples.length >= 2) {
+          const first = speedSamples[0], last = speedSamples[speedSamples.length - 1];
+          const dt = (last.t - first.t) / 1000;
+          if (dt > 0) speedBps = Math.max(0, (last.b - first.b) / dt);
+        }
+
+        dlStatDone.textContent = completed.toLocaleString();
+        dlStatRemaining.textContent = remaining.toLocaleString();
+        dlStatActive.textContent = downloading.toLocaleString();
+        dlStatSpeed.textContent = formatSpeed(speedBps);
+        dlStatBytes.textContent = `${formatSize(bytesDone)} / ${formatSize(bytesTotal)}`;
+        dlStatFailed.textContent = failed.toLocaleString();
+        dlStatSkipped.textContent = skipped.toLocaleString();
+        dlStatElapsed.textContent = formatDuration(prog.elapsed_seconds || 0);
+
+        renderFailures(prog.failures || [], prog.failure_log_path);
+        renderSkipped(prog.skipped_items || []);
+
+        if (completed + failed >= total && total > 0) {
+          clearInterval(timer);
+          dlCloseBtn.style.display = "";
+          statusText.textContent = `Downloaded ${completed - skipped} new, ${skipped} already present` + (failed > 0 ? `, ${failed} failed` : "");
+        }
       } catch {}
     }, 800);
+  }
+
+  function formatSpeed(bps) {
+    if (bps < 1024) return bps.toFixed(0) + " B/s";
+    if (bps < 1024 * 1024) return (bps / 1024).toFixed(1) + " KB/s";
+    if (bps < 1024 * 1024 * 1024) return (bps / 1024 / 1024).toFixed(1) + " MB/s";
+    return (bps / 1024 / 1024 / 1024).toFixed(2) + " GB/s";
+  }
+
+  function formatDuration(sec) {
+    sec = Math.floor(sec);
+    if (sec < 60) return sec + "s";
+    const m = Math.floor(sec / 60), s = sec % 60;
+    if (m < 60) return `${m}m ${s}s`;
+    const h = Math.floor(m / 60), mm = m % 60;
+    return `${h}h ${mm}m`;
+  }
+
+  function renderFailures(failures, logPath) {
+    lastFailureLogPath = logPath || null;
+    if (!failures || !failures.length) { dlFailuresSection.style.display = "none"; return; }
+    dlFailuresSection.style.display = "";
+    dlFailuresCount.textContent = failures.length;
+    dlFailuresLogPath.textContent = logPath ? `Log: ${logPath}` : "";
+    dlFailuresList.innerHTML = failures.map((f) => `<div class="dl-failure"><div class="dl-failure-name">${escapeHtml(f.file_name)}</div><div class="dl-failure-path">${escapeHtml(f.dest_path || "")}</div><div class="dl-failure-error">${escapeHtml(f.error_type ? f.error_type + ": " : "")}${escapeHtml(f.error || "")}</div></div>`).join("");
+  }
+
+  function renderSkipped(items) {
+    if (!items || !items.length) { dlSkippedSection.style.display = "none"; return; }
+    dlSkippedSection.style.display = "";
+    dlSkippedCount.textContent = items.length;
+    dlSkippedList.innerHTML = items.slice(0, 500).map((item) => `<div class="dl-failure"><div class="dl-failure-name">${escapeHtml(item.file_name)}</div><div class="dl-failure-path">${escapeHtml(item.dest_path || "")}</div></div>`).join("");
+  }
+
+  async function copyFailureLogPath() {
+    if (!lastFailureLogPath) return;
+    try { await navigator.clipboard.writeText(lastFailureLogPath); statusText.textContent = "Copied log path"; } catch {}
+  }
+
+  async function clearFailures() {
+    try { await api("/download/failures/clear", { method: "POST" }); dlFailuresSection.style.display = "none"; } catch {}
+  }
+
+  async function toggleHideDownloaded() {
+    if (hideDownloadedDir) {
+      hideDownloadedDir = null;
+      downloadedFileIds = new Set();
+      hideDownloadedBtn.classList.remove("btn-toggle-active");
+      hideDownloadedBtn.textContent = "Hide downloaded…";
+      hideDownloadedInfo.style.display = "none";
+      loadCurrentView();
+      return;
+    }
+    const dir = await window.electronAPI.selectDirectory();
+    if (!dir) return;
+    hideDownloadedDir = dir;
+    hideDownloadedBtn.classList.add("btn-toggle-active");
+    hideDownloadedBtn.textContent = "Show downloaded";
+    hideDownloadedInfo.textContent = `Hiding files in ${dir}`;
+    hideDownloadedInfo.title = dir;
+    hideDownloadedInfo.style.display = "";
+    loadCurrentView();
+  }
+
+  async function applyHideDownloadedFilter() {
+    if (!hideDownloadedDir || !allFiles.length) { downloadedFileIds = new Set(); return; }
+    const candidates = allFiles.filter((f) => f.is_folder !== 1);
+    if (!candidates.length) return;
+    try {
+      const data = await api("/download/check-existing", { method: "POST", body: JSON.stringify({ files: candidates.map((f) => ({ id: f.id, name: f.name, mime_type: f.mime_type })), dest_dir: hideDownloadedDir }) });
+      downloadedFileIds = new Set(data.existing_ids || []);
+      const beforeCount = allFiles.length;
+      allFiles = allFiles.filter((f) => !downloadedFileIds.has(f.id));
+      const hidden = beforeCount - allFiles.length;
+      totalCount = allFiles.length;
+      hideDownloadedInfo.textContent = `Hiding ${hidden.toLocaleString()} in ${hideDownloadedDir}`;
+    } catch (e) {
+      statusText.textContent = "Hide-downloaded error: " + e.message;
+      hideDownloadedDir = null;
+      hideDownloadedBtn.classList.remove("btn-toggle-active");
+      hideDownloadedBtn.textContent = "Hide downloaded…";
+      hideDownloadedInfo.style.display = "none";
+    }
   }
 
   function onDeleteClick() { if (!selectedIds.size) return; deleteCountSpan.textContent = selectedIds.size; deleteModal.style.display = "flex"; }
 
   async function doDelete() {
     deleteModal.style.display = "none";
-    const ids = Array.from(selectedIds); statusText.textContent = `Deleting ${ids.length} files...`;
+    const idSet = new Set(selectedIds);
+    const files = allFiles.filter((f) => idSet.has(f.id)).map((f) => ({ id: f.id, name: f.name }));
+    if (!files.length) return;
     try {
-      const result = await api("/delete", { method: "POST", body: JSON.stringify({ file_ids: ids }) });
-      const successes = result.results.filter((r) => r.success).length, failures = result.results.filter((r) => !r.success).length;
-      const deletedIds = new Set(result.results.filter((r) => r.success).map((r) => r.id));
-      allFiles = allFiles.filter((f) => !deletedIds.has(f.id)); totalCount -= successes; selectedIds.clear();
-      setupVirtualScroll(); updateSelectionUI(); updateStats();
-      statusText.textContent = `Deleted ${successes} files` + (failures > 0 ? `, ${failures} failed` : "");
+      await api("/delete", { method: "POST", body: JSON.stringify({ files }) });
+      deleteProgressModal.style.display = "flex";
+      delCloseBtn.style.display = "none";
+      delFailuresSection.style.display = "none";
+      delProgressBar.style.width = "0%";
+      delProgressText.textContent = `0 / ${files.length} completed`;
+      pollDeleteProgress();
     } catch (e) { statusText.textContent = "Delete error: " + e.message; }
+  }
+
+  function pollDeleteProgress() {
+    const timer = setInterval(async () => {
+      try {
+        const prog = await api("/delete/progress");
+        const total = prog.total || 0, completed = prog.completed || 0, failed = prog.failed || 0;
+        delProgressBar.style.width = (total > 0 ? ((completed + failed) / total) * 100 : 0) + "%";
+        delProgressText.textContent = `${completed} / ${total} completed` + (failed > 0 ? ` (${failed} failed)` : "");
+        const failures = prog.failures || [];
+        if (failures.length) {
+          delFailuresSection.style.display = "";
+          delFailuresCount.textContent = failures.length;
+          delFailuresList.innerHTML = failures.map((f) => `<div class="dl-failure"><div class="dl-failure-name">${escapeHtml(f.file_name)}</div><div class="dl-failure-error">${escapeHtml(f.error_type ? f.error_type + ": " : "")}${escapeHtml(f.error || "")}</div></div>`).join("");
+        }
+        if (!prog.running && total > 0) {
+          clearInterval(timer);
+          delCloseBtn.style.display = "";
+          selectedIds.clear();
+          statusText.textContent = `Deleted ${completed} files` + (failed > 0 ? `, ${failed} failed` : "");
+        }
+      } catch {}
+    }, 600);
   }
 
   function updateSortUI() { $$(".sortable").forEach((el) => { el.classList.toggle("active", el.dataset.sort === sortBy); const a = el.querySelector(".sort-arrow"); if (a) a.textContent = sortDir === "ASC" ? "▲" : "▼"; }); }

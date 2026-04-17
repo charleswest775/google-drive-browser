@@ -95,12 +95,31 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,sans-
 .progress-bar{width:100%;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;margin:12px 0}
 .progress-fill{height:100%;background:var(--primary);transition:width .3s;border-radius:4px}
 .dl-items-list{max-height:200px;overflow-y:auto;margin-top:12px;font-size:12px}
+.dl-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}
+.dl-stat{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.dl-stat-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px}
+.dl-stat-value{font-size:14px;font-weight:600;color:var(--text)}
 .dl-item{display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)}
 .dl-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-item-status{margin-left:12px;font-weight:500}
 .dl-item-status.completed{color:var(--success)}
 .dl-item-status.failed{color:var(--danger)}
 .dl-item-status.downloading{color:var(--primary)}
+.hide-info{font-size:11px;color:var(--text-muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn.btn-toggle-active{background:var(--primary);border-color:var(--primary);color:#fff}
+#dl-failures-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}
+.dl-failures-header{display:flex;align-items:center;gap:8px;margin-bottom:6px;color:var(--danger)}
+.dl-failures-header strong{flex:1}
+#dl-failures-log-path{font-size:11px;color:var(--text-muted);word-break:break-all;margin-bottom:8px}
+.dl-failures-list{max-height:200px;overflow-y:auto;font-size:12px;background:var(--bg);border-radius:6px;padding:6px 10px}
+.dl-failure{padding:4px 0;border-bottom:1px solid rgba(59,59,92,.3)}
+.dl-failure:last-child{border-bottom:none}
+.dl-failure-name{font-weight:500;color:var(--text)}
+.dl-failure-error{font-size:11px;color:var(--danger);margin-top:2px;word-break:break-word}
+.dl-failure-path{font-size:11px;color:var(--text-muted);word-break:break-all}
+.dl-skipped-header{color:var(--text-muted)}
+.dl-skipped-header .hint{font-weight:400;font-size:11px;margin-left:8px}
+#dl-skipped-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}
 #indexing-overlay{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.7)}
 .indexing-card{text-align:center;padding:40px;background:var(--bg-surface);border:1px solid var(--border);border-radius:16px;min-width:340px}
 .indexing-card h3{margin:16px 0 8px}

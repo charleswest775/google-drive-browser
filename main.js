@@ -82,5 +82,17 @@ app.whenReady().then(async () => {
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on("window-all-closed", () => { if (backendProcess) backendProcess.kill(); if (process.platform !== "darwin") app.quit(); });
-app.on("before-quit", () => { if (backendProcess) backendProcess.kill(); });
+function killBackend() {
+  if (!backendProcess) return;
+  const proc = backendProcess;
+  backendProcess = null;
+  try { proc.stdin && proc.stdin.end(); } catch {}
+  try { proc.kill("SIGTERM"); } catch {}
+  setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 1500);
+}
+
+app.on("window-all-closed", () => { killBackend(); if (process.platform !== "darwin") app.quit(); });
+app.on("before-quit", () => { killBackend(); });
+process.on("exit", () => { killBackend(); });
+process.on("SIGINT", () => { killBackend(); process.exit(0); });
+process.on("SIGTERM", () => { killBackend(); process.exit(0); });

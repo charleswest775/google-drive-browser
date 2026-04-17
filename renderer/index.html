@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Google Drive Browser</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="auth-screen" class="screen">
+    <div class="auth-card">
+      <div class="auth-icon">
+        <svg width="64" height="64" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+          <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H1.05c0 1.6.4 3.2 1.2 4.6z" fill="#0066da"/>
+          <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0-1.2 4.6h27.5z" fill="#00ac47"/>
+          <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.6H59.85l5.85 10.75z" fill="#ea4335"/>
+          <path d="M43.65 25 57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+          <path d="m59.8 53h-32.3L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h22.6c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+          <path d="m73.4 26.5-12.7-22a6.89 6.89 0 0 0-3.3-3.3L43.65 25l16.15 28h27.45c0-1.6-.4-3.2-1.2-4.6z" fill="#ffba00"/>
+        </svg>
+      </div>
+      <h1>Google Drive Browser</h1>
+      <p>Browse, download, and manage all your Drive files — including orphans.</p>
+      <button id="login-btn" class="btn btn-primary">Sign in with Google</button>
+      <p id="auth-error" class="error-text" style="display:none"></p>
+      <p class="auth-hint">Make sure you've placed <code>credentials.json</code> in the project root.</p>
+    </div>
+  </div>
+
+  <div id="app-screen" class="screen" style="display:none">
+    <header id="topbar">
+      <div class="topbar-left">
+        <h2>Drive Browser</h2>
+        <span id="user-email" class="user-email"></span>
+      </div>
+      <div class="topbar-center">
+        <div class="search-box">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="search-input" placeholder="Search files..." />
+        </div>
+      </div>
+      <div class="topbar-right">
+        <button id="refresh-btn" class="btn btn-sm" title="Re-index Drive">Re-index</button>
+        <button id="logout-btn" class="btn btn-sm btn-danger" title="Sign out">Sign out</button>
+      </div>
+    </header>
+    <div id="toolbar">
+      <div class="toolbar-left"><span id="breadcrumb"></span></div>
+      <div class="toolbar-right">
+        <span id="selection-count" style="display:none">0 selected</span>
+        <button id="select-all-btn" class="btn btn-sm">Select All</button>
+        <button id="deselect-btn" class="btn btn-sm" style="display:none">Deselect</button>
+        <button id="download-btn" class="btn btn-sm btn-primary" style="display:none">Download</button>
+        <button id="delete-btn" class="btn btn-sm btn-danger" style="display:none">Delete</button>
+      </div>
+    </div>
+    <div id="main-content">
+      <aside id="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-item active" data-id="root" data-type="root"><span class="folder-icon">📁</span> My Drive</div>
+          <div id="folder-tree" class="tree-container"></div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-item" data-id="orphans" data-type="orphans"><span class="folder-icon">🔗</span> Orphaned Files <span id="orphan-count" class="badge">0</span></div>
+        </div>
+        <div class="sidebar-section sidebar-stats">
+          <div id="stats-info">
+            <small>Total: <span id="stat-total">-</span></small><br/>
+            <small>Folders: <span id="stat-folders">-</span></small><br/>
+            <small>Orphans: <span id="stat-orphans">-</span></small>
+          </div>
+        </div>
+      </aside>
+      <main id="file-list-container">
+        <div id="column-headers">
+          <div class="col-check"><input type="checkbox" id="header-checkbox" /></div>
+          <div class="col-icon"></div>
+          <div class="col-name sortable" data-sort="name">Name <span class="sort-arrow">▲</span></div>
+          <div class="col-size sortable" data-sort="size">Size</div>
+          <div class="col-type sortable" data-sort="mime_type">Type</div>
+          <div class="col-modified sortable" data-sort="modified_time">Modified</div>
+          <div class="col-owner">Owner</div>
+        </div>
+        <div id="file-viewport">
+          <div id="file-scroll-spacer"></div>
+          <div id="file-rows"></div>
+        </div>
+        <div id="loading-state" style="display:none"><div class="spinner"></div><p>Loading files...</p></div>
+        <div id="empty-state" style="display:none"><p>No files found.</p></div>
+      </main>
+    </div>
+    <footer id="statusbar">
+      <span id="status-text">Ready</span>
+      <span id="index-progress" style="display:none">Indexing: <span id="index-count">0</span> files (<span id="index-pages">0</span> pages)<div class="progress-bar-mini"><div id="index-bar" class="progress-fill-mini"></div></div></span>
+    </footer>
+  </div>
+
+  <div id="delete-modal" class="modal" style="display:none">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <h3>⚠️ Permanently Delete Files</h3>
+      <p>You are about to <strong>permanently delete</strong> <span id="delete-count">0</span> file(s).</p>
+      <p class="warning-text">This action cannot be undone. Files will NOT go to trash.</p>
+      <div class="modal-actions">
+        <button id="delete-cancel" class="btn">Cancel</button>
+        <button id="delete-confirm" class="btn btn-danger">Delete Permanently</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="download-modal" class="modal" style="display:none">
+    <div class="modal-overlay"></div>
+    <div class="modal-content modal-wide">
+      <h3>Downloading Files</h3>
+      <div class="progress-bar"><div id="dl-progress-bar" class="progress-fill"></div></div>
+      <p id="dl-progress-text">0 / 0 completed</p>
+      <div id="dl-items-list" class="dl-items-list"></div>
+      <div class="modal-actions"><button id="dl-close" class="btn btn-primary" style="display:none">Close</button></div>
+    </div>
+  </div>
+
+  <div id="indexing-overlay" style="display:none">
+    <div class="indexing-card">
+      <div class="spinner large"></div>
+      <h3>Indexing your Drive</h3>
+      <p>Scanning all files and folders...</p>
+      <p><strong id="indexing-count">0</strong> files found (<strong id="indexing-pages">0</strong> pages)</p>
+      <div class="progress-bar"><div id="indexing-bar" class="progress-fill"></div></div>
+      <p class="hint">This may take a few minutes for large drives.</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

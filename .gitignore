@@ -1,0 +1,7 @@
+node_modules/
+credentials.json
+token.json
+backend/file_cache.db
+backend/__pycache__/
+*.pyc
+.DS_Store
